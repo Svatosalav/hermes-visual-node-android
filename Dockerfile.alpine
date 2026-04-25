@@ -1,0 +1,16 @@
+FROM --platform=linux/amd64 eclipse-temurin:17-jdk-alpine
+
+RUN apk add --no-cache wget unzip bash
+
+WORKDIR /app
+COPY . .
+
+ENV ANDROID_SDK_ROOT=/app/android-sdk
+ENV ANDROID_HOME=/app/android-sdk
+ENV GRADLE_OPTS="-Xmx512m -XX:MaxMetaspaceSize=256m"
+
+RUN chmod +x gradlew && \
+    ./gradlew --version && \
+    ./gradlew assembleDebug --no-daemon --stacktrace --info
+
+CMD ["cp", "app/build/outputs/apk/debug/app-debug.apk", "/output/"]

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermes Visual Node</string>
+    <string name="server_url_hint">http://192.168.1.100:8766</string>
+    <string name="node_id_hint">my-phone</string>
+    <string name="start_button">Запустить плавающую кнопку</string>
+    <string name="stop_button">Остановить</string>
+    <string name="permission_required">Нужно разрешение для отображения поверх других приложений</string>
+    <string name="overlay_activated">Плавающая кнопка активирована</string>
+    <string name="overlay_deactivated">Плавающая кнопка отключена</string>
+    <string name="screenshot_sent">Скриншот отправлен</string>
+    <string name="screenshot_captured">Скриншот захвачен</string>
+    <string name="node_registered">Нода зарегистрирована</string>
+</resources>
