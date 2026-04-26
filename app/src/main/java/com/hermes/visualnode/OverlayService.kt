@@ -19,7 +19,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.util.Base64
 
 class OverlayService : Service() {
     
@@ -243,11 +242,7 @@ class OverlayService : Service() {
                     val stream = ByteArrayOutputStream()
                     screenshot.compress(Bitmap.CompressFormat.JPEG, 85, stream)
                     val imageBytes = stream.toByteArray()
-                    val base64 = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        Base64.getEncoder().encodeToString(imageBytes)
-                    } else {
-                        android.util.Base64.encodeToString(imageBytes, android.util.Base64.DEFAULT)
-                    }
+                    val base64 = android.util.Base64.encodeToString(imageBytes, android.util.Base64.DEFAULT)
                     json.put("image", base64)
                 }
                 

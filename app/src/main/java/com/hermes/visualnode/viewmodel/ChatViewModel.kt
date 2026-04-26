@@ -15,7 +15,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.ByteArrayOutputStream
-import java.util.Base64
 
 class ChatViewModel : ViewModel() {
     
@@ -51,7 +50,7 @@ class ChatViewModel : ViewModel() {
                 val imageBase64 = screenshot?.let { bitmap ->
                     val stream = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-                    Base64.getEncoder().encodeToString(stream.toByteArray())
+                    android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.DEFAULT)
                 }
                 
                 // Отправить запрос
