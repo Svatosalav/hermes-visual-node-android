@@ -11,4 +11,5 @@
     <string name="screenshot_sent">Скриншот отправлен</string>
     <string name="screenshot_captured">Скриншот захвачен</string>
     <string name="node_registered">Нода зарегистрирована</string>
+    <string name="accessibility_service_description">Позволяет Алисе полностью управлять вашим телефоном: делать клики, свайпы, вводить текст, открывать приложения и выполнять другие действия по вашей команде.</string>
 </resources>

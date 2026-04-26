@@ -11,31 +11,35 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.*
-import android.widget.ImageView
-import android.widget.Toast
+import android.widget.*
 import androidx.core.app.NotificationCompat
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.util.Base64
 
 class OverlayService : Service() {
     
     private lateinit var windowManager: WindowManager
-    private var floatingView: View? = null
+    private var floatingButton: View? = null
+    private var chatOverlay: View? = null
     private lateinit var serverUrl: String
     private lateinit var nodeId: String
     private val client = OkHttpClient()
+    private var pendingScreenshot: Bitmap? = null
     
     companion object {
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "hermes_visual_node_channel"
-        const val SCREENSHOT_REQUEST = 1002
+        var instance: OverlayService? = null
     }
     
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
     }
     
@@ -43,14 +47,10 @@ class OverlayService : Service() {
         serverUrl = intent?.getStringExtra("server_url") ?: ""
         nodeId = intent?.getStringExtra("node_id") ?: ""
         
-        // Запустить foreground service
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
         
-        // Создать плавающую кнопку
         createFloatingButton()
-        
-        // Зарегистрировать ноду на сервере
         registerNode()
         
         return START_STICKY
@@ -65,7 +65,7 @@ class OverlayService : Service() {
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Hermes Visual Node")
-            .setContentText("Плавающая кнопка активна")
+            .setContentText("Алиса готова помочь")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(pendingIntent)
             .build()
@@ -86,7 +86,7 @@ class OverlayService : Service() {
     private fun createFloatingButton() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         
-        floatingView = LayoutInflater.from(this).inflate(R.layout.floating_button, null)
+        floatingButton = LayoutInflater.from(this).inflate(R.layout.floating_button, null)
         
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -99,24 +99,24 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
         
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = 0
-        params.y = 100
+        params.gravity = Gravity.TOP or Gravity.END
+        params.x = 20
+        params.y = 200
         
-        windowManager.addView(floatingView, params)
+        windowManager.addView(floatingButton, params)
         
-        // Обработка кликов
-        val button = floatingView?.findViewById<ImageView>(R.id.floatingButton)
+        val button = floatingButton?.findViewById<ImageView>(R.id.floatingButton)
         button?.setOnClickListener {
-            takeScreenshot()
+            takeScreenshotAndShowChat()
         }
         
-        // Перетаскивание кнопки
+        // Перетаскивание
         button?.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
+            private var moved = false
             
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
@@ -125,12 +125,25 @@ class OverlayService : Service() {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
+                        moved = false
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(floatingView, params)
+                        val dx = (event.rawX - initialTouchX).toInt()
+                        val dy = (event.rawY - initialTouchY).toInt()
+                        
+                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                            moved = true
+                            params.x = initialX + dx
+                            params.y = initialY + dy
+                            windowManager.updateViewLayout(floatingButton, params)
+                        }
+                        return true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!moved) {
+                            v.performClick()
+                        }
                         return true
                     }
                 }
@@ -139,13 +152,8 @@ class OverlayService : Service() {
         })
     }
     
-    private fun takeScreenshot() {
-        // Для Android 5.0+ используем Media Projection API
+    private fun takeScreenshotAndShowChat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
-            
-            // Запустить активность для получения разрешения
             val intent = Intent(this, ScreenshotActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
             startActivity(intent)
@@ -154,36 +162,125 @@ class OverlayService : Service() {
         }
     }
     
-    fun sendScreenshot(bitmap: Bitmap) {
+    fun showChatOverlay(screenshot: Bitmap?) {
+        pendingScreenshot = screenshot
+        
+        if (chatOverlay != null) {
+            windowManager.removeView(chatOverlay)
+        }
+        
+        chatOverlay = LayoutInflater.from(this).inflate(R.layout.chat_overlay, null)
+        
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+        
+        windowManager.addView(chatOverlay, params)
+        
+        // Настроить UI
+        val messageInput = chatOverlay?.findViewById<EditText>(R.id.messageInput)
+        val sendButton = chatOverlay?.findViewById<ImageButton>(R.id.sendButton)
+        val closeButton = chatOverlay?.findViewById<ImageButton>(R.id.closeButton)
+        val screenshotPreview = chatOverlay?.findViewById<ImageView>(R.id.screenshotPreview)
+        val removeScreenshotButton = chatOverlay?.findViewById<ImageButton>(R.id.removeScreenshot)
+        
+        // Показать превью скриншота
+        if (screenshot != null) {
+            screenshotPreview?.setImageBitmap(screenshot)
+            screenshotPreview?.visibility = View.VISIBLE
+            removeScreenshotButton?.visibility = View.VISIBLE
+        }
+        
+        removeScreenshotButton?.setOnClickListener {
+            pendingScreenshot = null
+            screenshotPreview?.visibility = View.GONE
+            removeScreenshotButton.visibility = View.GONE
+        }
+        
+        sendButton?.setOnClickListener {
+            val message = messageInput?.text.toString()
+            if (message.isNotBlank() || pendingScreenshot != null) {
+                sendMessageToHermes(message, pendingScreenshot)
+                messageInput?.setText("")
+                pendingScreenshot = null
+                screenshotPreview?.visibility = View.GONE
+                removeScreenshotButton?.visibility = View.GONE
+            }
+        }
+        
+        closeButton?.setOnClickListener {
+            closeChatOverlay()
+        }
+        
+        // Фокус на поле ввода
+        messageInput?.requestFocus()
+    }
+    
+    private fun closeChatOverlay() {
+        chatOverlay?.let {
+            windowManager.removeView(it)
+            chatOverlay = null
+        }
+        pendingScreenshot = null
+    }
+    
+    private fun sendMessageToHermes(message: String, screenshot: Bitmap?) {
         Thread {
             try {
-                // Конвертировать в JPEG
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-                val imageBytes = stream.toByteArray()
+                val json = JSONObject()
+                json.put("message", message)
                 
-                // Отправить на сервер
-                val requestBody = imageBytes.toRequestBody("image/jpeg".toMediaType())
+                // Добавить скриншот если есть
+                if (screenshot != null) {
+                    val stream = ByteArrayOutputStream()
+                    screenshot.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    val imageBytes = stream.toByteArray()
+                    val base64 = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        Base64.getEncoder().encodeToString(imageBytes)
+                    } else {
+                        android.util.Base64.encodeToString(imageBytes, android.util.Base64.DEFAULT)
+                    }
+                    json.put("image", base64)
+                }
+                
+                val requestBody = json.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
-                    .url("$serverUrl/nodes/$nodeId/screenshot")
+                    .url("$serverUrl/chat")
                     .post(requestBody)
                     .build()
                 
                 client.newCall(request).execute().use { response ->
                     Handler(Looper.getMainLooper()).post {
                         if (response.isSuccessful) {
-                            Toast.makeText(this, "Скриншот отправлен", Toast.LENGTH_SHORT).show()
+                            val responseBody = response.body?.string()
+                            val responseJson = JSONObject(responseBody ?: "{}")
+                            val reply = responseJson.optString("response", "Ответ получен")
+                            
+                            Toast.makeText(this, "Алиса: $reply", Toast.LENGTH_LONG).show()
+                            closeChatOverlay()
                         } else {
-                            Toast.makeText(this, "Ошибка отправки: ${response.code}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "Ошибка: ${response.code}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
-            } catch (e: IOException) {
+            } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }.start()
+    }
+    
+    fun sendScreenshot(bitmap: Bitmap) {
+        showChatOverlay(bitmap)
     }
     
     private fun registerNode() {
@@ -199,19 +296,21 @@ class OverlayService : Service() {
                 client.newCall(request).execute().use { response ->
                     Handler(Looper.getMainLooper()).post {
                         if (response.isSuccessful) {
-                            Toast.makeText(this, "Нода зарегистрирована", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "Подключено к Hermes", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             } catch (e: IOException) {
-                // Игнорируем ошибки регистрации
+                // Игнорируем
             }
         }.start()
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        floatingView?.let { windowManager.removeView(it) }
+        floatingButton?.let { windowManager.removeView(it) }
+        chatOverlay?.let { windowManager.removeView(it) }
+        instance = null
     }
     
     override fun onBind(intent: Intent?): IBinder? = null
